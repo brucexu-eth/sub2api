@@ -11,6 +11,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/typesafe"
 	"github.com/gin-gonic/gin"
+	"github.com/tidwall/gjson"
 )
 
 type SystemOneForwardResult struct {
@@ -32,6 +33,14 @@ func (e *SystemOneUpstreamError) Error() string {
 
 func (s *GatewayService) ForwardSystemOne(ctx context.Context, c *gin.Context, account *Account, body []byte) (*SystemOneForwardResult, error) {
 	started := time.Now()
+	// Composite middleware has already rewritten the wire model. Preserve the
+	// client alias separately so billing and audit can trace both identities.
+	upstreamModel := gjson.GetBytes(body, "model").String()
+	publicModel := upstreamModel
+	if requested, ok := RequestedPublicModelFromContext(ctx); ok {
+		publicModel = requested
+	}
+
 	if account == nil || !account.IsTypeSafe() || account.Type != AccountTypeAPIKey {
 		return nil, errors.New("invalid typesafe account")
 	}
@@ -62,7 +71,7 @@ func (s *GatewayService) ForwardSystemOne(ctx context.Context, c *gin.Context, a
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		return nil, s.handleSystemOneErrorResponse(ctx, c, account, resp, upstreamURL)
+		return nil, s.handleSystemOneErrorResponse(ctx, c, account, resp, upstreamURL, upstreamModel)
 	}
 
 	decoded, err := typesafe.DecodeSystemOneResponse(resp.Body)
@@ -90,7 +99,8 @@ func (s *GatewayService) ForwardSystemOne(ctx context.Context, c *gin.Context, a
 			RequestID:             resp.Header.Get("x-request-id"),
 			UpstreamHeaders:       resp.Header.Clone(),
 			Usage:                 ClaudeUsage{InputTokens: decoded.Usage.InputTokens, OutputTokens: decoded.Usage.OutputTokens},
-			Model:                 typesafe.JevLatestModel,
+			Model:                 publicModel,
+			UpstreamModel:         upstreamModel,
 			UpstreamResponseModel: decoded.Model,
 			Duration:              time.Since(started),
 		},
@@ -118,7 +128,7 @@ func IsSystemOneRequestErrorStatus(status int) bool {
 // goes through the account error policy (custom error codes, temporary
 // unschedulable rules, pool mode) and fails over when the status is retryable
 // or the policy took the account out of rotation.
-func (s *GatewayService) handleSystemOneErrorResponse(ctx context.Context, c *gin.Context, account *Account, resp *http.Response, upstreamURL string) error {
+func (s *GatewayService) handleSystemOneErrorResponse(ctx context.Context, c *gin.Context, account *Account, resp *http.Response, upstreamURL, upstreamModel string) error {
 	respBody, _ := s.readUpstreamErrorBody(resp)
 	upstreamMsg := sanitizeUpstreamErrorMessage(strings.TrimSpace(extractUpstreamErrorMessage(respBody)))
 	setOpsUpstreamError(c, resp.StatusCode, upstreamMsg, "")
@@ -143,7 +153,7 @@ func (s *GatewayService) handleSystemOneErrorResponse(ctx context.Context, c *gi
 
 	shouldDisable := false
 	if s.rateLimitService != nil {
-		shouldDisable = s.rateLimitService.HandleUpstreamError(ctx, account, resp.StatusCode, resp.Header, respBody, typesafe.JevLatestModel)
+		shouldDisable = s.rateLimitService.HandleUpstreamError(ctx, account, resp.StatusCode, resp.Header, respBody, upstreamModel)
 	}
 	if !shouldDisable && !s.shouldFailoverUpstreamError(resp.StatusCode) {
 		appendOpsUpstreamError(c, event)

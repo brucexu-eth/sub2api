@@ -5,8 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 )
+
+var jevVersionModel = regexp.MustCompile(`^jev-[0-9]+\.[0-9]+\.[0-9]+$`)
 
 var ErrStreamingUnsupported = errors.New("typesafe system one does not support streaming")
 
@@ -38,8 +41,8 @@ func ValidateSystemOneRequest(body []byte) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if model != JevLatestModel {
-		return "", fmt.Errorf("model must be %s", JevLatestModel)
+	if model != JevLatestModel && model != "jev-preview" && !jevVersionModel.MatchString(model) {
+		return "", fmt.Errorf("model must be %s, jev-preview, or a versioned Jev model", JevLatestModel)
 	}
 	if err := validateStringObjectOrArray(envelope.State, "state"); err != nil {
 		return "", err

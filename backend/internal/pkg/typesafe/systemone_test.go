@@ -122,3 +122,15 @@ func TestDecodeSystemOneResponseRejectsNonObjects(t *testing.T) {
 	_, err := DecodeSystemOneResponse(strings.NewReader(`{"pad":"` + strings.Repeat("a", MaxSystemOneResponseBytes) + `"}`))
 	require.ErrorIs(t, err, ErrSystemOneResponseTooLarge)
 }
+
+func TestValidateSystemOneRequestVersionedModels(t *testing.T) {
+	for _, model := range []string{"jev-1.14.0", "jev-1.13.0", "jev-preview"} {
+		got, err := ValidateSystemOneRequest([]byte(`{"model":"` + model + `","state":"sample","questions":{"q":{"type":"noul"}}}`))
+		require.NoError(t, err)
+		require.Equal(t, model, got)
+	}
+	for _, model := range []string{"information-decision", "gpt-sol", "jev-1.14", "jev-1.14.0/other", "jev-1.14.0 "} {
+		_, err := ValidateSystemOneRequest([]byte(`{"model":"` + model + `","state":"sample","questions":{"q":{"type":"noul"}}}`))
+		require.Error(t, err)
+	}
+}

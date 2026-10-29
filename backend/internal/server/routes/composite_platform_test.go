@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/requestmodel"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/typesafe"
 	servermiddleware "github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
@@ -414,4 +415,32 @@ func TestCompositeLiveRouteDispatchesBySessionModelNotTopLevelAlias(t *testing.T
 	router.ServeHTTP(w, req)
 
 	require.Equal(t, http.StatusNoContent, w.Code)
+}
+
+func TestCompositeSystemOneAliasUsesPinnedJevVersion(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	resolver := service.NewCompositeRouteResolver(compositeRouteRepoStub{routes: []service.CompositeModelRoute{{ID: 52, GroupID: 11, PublicModel: "information-decision", MatchType: service.CompositeRouteMatchExact, TargetPlatform: service.PlatformTypeSafe, UpstreamModel: "jev-1.14.0", Endpoint: service.CompositeRouteEndpointAny, Enabled: true}}})
+	router.Use(func(c *gin.Context) {
+		gid := int64(11)
+		c.Set(string(servermiddleware.ContextKeyAPIKey), &service.APIKey{GroupID: &gid, Group: &service.Group{ID: gid, Platform: service.PlatformComposite}})
+		c.Next()
+	})
+	router.Use(compositeTargetPlatformMiddleware(resolver))
+	router.POST("/v1/systemone", func(c *gin.Context) {
+		body, err := io.ReadAll(c.Request.Body)
+		require.NoError(t, err)
+		model, err := typesafe.ValidateSystemOneRequest(body)
+		require.NoError(t, err)
+		require.Equal(t, "jev-1.14.0", model)
+		alias, ok := service.RequestedPublicModelFromContext(c.Request.Context())
+		require.True(t, ok)
+		require.Equal(t, "information-decision", alias)
+		c.Status(http.StatusNoContent)
+	})
+	req := httptest.NewRequest(http.MethodPost, "/v1/systemone", strings.NewReader(`{"model":"information-decision","state":"sample","questions":{"q":{"type":"noul"}}}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusNoContent, rec.Code)
 }

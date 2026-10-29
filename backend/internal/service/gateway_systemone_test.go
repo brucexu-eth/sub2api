@@ -400,3 +400,22 @@ func TestTypeSafeModelsListCandidates(t *testing.T) {
 	require.Equal(t, []string{typesafe.JevLatestModel}, defaultModelsListCandidateIDs(PlatformTypeSafe))
 	require.NotContains(t, compositeDefaultModelsListCandidateIDs(), typesafe.JevLatestModel)
 }
+
+func TestForwardSystemOnePreservesCompositeAliasAndPinnedModel(t *testing.T) {
+	body := []byte(`{"model":"jev-1.14.0","state":"sample","questions":{"q":{"type":"noul"}}}`)
+	upstream := &systemOneHTTPUpstream{do: func(req *http.Request) (*http.Response, error) {
+		got, err := io.ReadAll(req.Body)
+		require.NoError(t, err)
+		require.Equal(t, body, got)
+		return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"model":"jev-1.14.0","answers":{"q":{"type":"noul","noul":0.9}},"usage":{"input_tokens":10,"output_tokens":2}}`))}, nil
+	}}
+	ctx := WithCompositeRouteDecision(context.Background(), CompositeRouteDecision{Matched: true, PublicModel: "information-decision", UpstreamModel: "jev-1.14.0", TargetPlatform: PlatformTypeSafe})
+	svc := newSystemOneTestService(upstream)
+	account := &Account{ID: 13, Platform: PlatformTypeSafe, Type: AccountTypeAPIKey, Credentials: map[string]any{"base_url": "http://typesafe.test", "api_key": "test-secret"}}
+	result, err := svc.ForwardSystemOne(ctx, newSystemOneTestContext(), account, body)
+	require.NoError(t, err)
+	require.Equal(t, "information-decision", result.Model)
+	require.Equal(t, "jev-1.14.0", result.UpstreamModel)
+	require.Equal(t, "jev-1.14.0", result.UpstreamResponseModel)
+	require.Equal(t, 10, result.Usage.InputTokens)
+}
