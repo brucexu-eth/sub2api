@@ -2234,3 +2234,14 @@ func TestGPT61SolExplicitZeroCacheWriteAcrossTiers(t *testing.T) {
 		require.Zero(t, cost.CacheCreationCost)
 	}
 }
+
+func TestGetModelPricing_JevPinnedVersionInputOnly(t *testing.T) {
+	svc := newTestBillingService()
+	p, err := svc.GetModelPricing("jev-1.14.0")
+	require.NoError(t, err)
+	require.InDelta(t, 0.042/1_000_000, p.InputPricePerToken, 1e-15)
+	require.Zero(t, p.OutputPricePerToken)
+	cost, err := svc.CalculateCost("jev-1.14.0", UsageTokens{InputTokens: 1_000_000, OutputTokens: 1000}, 1.0)
+	require.NoError(t, err)
+	require.InDelta(t, 0.042, cost.TotalCost, 1e-12)
+}

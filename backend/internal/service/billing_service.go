@@ -1050,7 +1050,7 @@ func (s *BillingService) initFallbackPricing() {
 // getFallbackPricing 根据模型系列获取回退价格
 func (s *BillingService) getFallbackPricing(model string) *ModelPricing {
 	modelLower := normalizeAntigravityClaudeTierAlias(strings.ToLower(model))
-	if modelLower == "jev-latest" {
+	if modelLower == "jev-latest" || modelLower == "jev-1.14.0" {
 		return s.fallbackPrices["jev-latest"]
 	}
 
